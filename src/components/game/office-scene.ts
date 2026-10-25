@@ -1,103 +1,150 @@
 import Phaser from "phaser";
-import {COLS,ROWS,canMove,furniture,type Player} from "@/lib/office";
+import {COLS,ROWS,canMove,isWater,furniture,type Player} from "@/lib/office";
 const TILE=40;
-type Entry={sprite:Phaser.GameObjects.Container;x:number;y:number;color:string};
 type Direction=Player["direction"];
-const tint=(s:string)=>parseInt(s.slice(1),16);
+type Entry={sprite:Phaser.GameObjects.Container;x:number;y:number;color:string;direction:Direction};
+const tint=(s:string)=>Number.parseInt(s.slice(1),16);
+const INDEX_COLS=56;
+const frame=(x:number,y:number)=>y*INDEX_COLS+x;
 export class OfficeScene extends Phaser.Scene{
-  private people=new Map<string,Entry>();
-  private avatarId="";
-  private onWalk:(x:number,y:number,d:Direction)=>void;
-  constructor(onWalk:(x:number,y:number,d:Direction)=>void){super("office");this.onWalk=onWalk;}
-  preload(){
-    this.load.spritesheet("indoor","/assets/roguelikeIndoor-atlas.png",{frameWidth:16,frameHeight:16});
-    this.load.spritesheet("chars","/assets/roguelikeChar-atlas.png",{frameWidth:16,frameHeight:16});
+ private people=new Map<string,Entry>();
+ private avatarId="";
+ private onWalk:(x:number,y:number,d:Direction)=>void;
+ constructor(onWalk:(x:number,y:number,d:Direction)=>void){super("office");this.onWalk=onWalk;}
+ preload(){
+  this.load.spritesheet("outdoor","/assets/roguelikeOutdoor-original.png",{frameWidth:17,frameHeight:17});
+  this.load.spritesheet("indoor","/assets/roguelikeIndoor-atlas.png",{frameWidth:16,frameHeight:16});
+  this.load.spritesheet("chars","/assets/roguelikeChar-atlas.png",{frameWidth:16,frameHeight:16});
+ }
+ create(){
+  const W=COLS*TILE,H=ROWS*TILE;
+  this.cameras.main.setBackgroundColor("#588e3d");
+  const ground=this.add.graphics().setDepth(0);
+  const grass=[0x5a913c,0x609741,0x59913d,0x568b39,0x60913d];
+  for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++){
+   ground.fillStyle(grass[(x*7+y*3)%grass.length]);
+   ground.fillRect(x*TILE,y*TILE,TILE,TILE);
+   if((x*13+y*17)%9===0){ground.fillStyle(0x477b35,.8);ground.fillRect(x*TILE+8,y*TILE+29,5,2);ground.fillRect(x*TILE+12,y*TILE+26,2,3);}
   }
-  create(){
-    const W=COLS*TILE,H=ROWS*TILE;
-    this.cameras.main.setBackgroundColor("#d1b9a0");
-    const tile=(frame:number,x:number,y:number,depth=0)=>this.add.image(x*TILE,y*TILE,"indoor",frame).setOrigin(0).setScale(2.5).setDepth(depth);
-    const graphics=this.add.graphics().setDepth(-1);
-    graphics.fillStyle(0xf0e3d5);graphics.fillRect(0,0,W,H);
-    for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++)
-      tile(y<2? (x%2?294:293):((x+y)%6===0?296:293),x,y,0);
-    for(let x=0;x<COLS;x++)tile(334,x,0,1);
-    for(const [x,y,title] of [[5,2,"WORK ZONE"],[11,6,"TEAM CORNER"],[20,2,"LOUNGE"]] as const)
-      this.add.text(x*TILE,y*TILE,title,{fontSize:"12px",fontFamily:"monospace",fontStyle:"bold",color:"#755c60"}).setDepth(3);
-    const mat=this.add.graphics().setDepth(.4);
-    mat.fillStyle(0xc5b4c2,.6);mat.fillRect(8*TILE,7*TILE,6*TILE,5*TILE);
-    mat.fillStyle(0xb4c2a9,.5);mat.fillRect(19*TILE,3*TILE,4*TILE,9*TILE);
-    for(const f of furniture){
-      const depth=(f.y+f.h)*TILE+1;
-      const stamp=(id:number,x:number,y:number)=>tile(id,x,y,depth);
-      if(f.kind==="desk"||f.kind==="table"){
-        const ids=f.kind==="desk"?[243,244,245,270,271,272]:[250,251,252,277,278,279];
-        for(let y=0;y<f.h;y++)for(let x=0;x<f.w;x++)stamp(ids[(y%2)*3+(x===0?0:x===f.w-1?2:1)],f.x+x,f.y+y);
-        if(f.kind==="desk")stamp(299,f.x+1,f.y);
-      }else if(f.kind==="sofa"){
-        for(let y=0;y<f.h;y++)for(let x=0;x<f.w;x++)stamp(x===0?313:314,f.x+x,f.y+y);
-      }else if(f.kind==="plant")stamp(16,f.x,f.y);
-      else if(f.kind==="shelf")for(let x=0;x<f.w;x++)stamp([478,479,480][x%3],f.x+x,f.y);
-      else if(f.kind==="whiteboard")for(let x=0;x<f.w;x++)stamp(x===0?343:x===f.w-1?345:344,f.x+x,f.y);
-      else if(f.kind==="coffee")for(let y=0;y<f.h;y++)for(let x=0;x<f.w;x++)stamp(y===0?329:356,f.x+x,f.y+y);
-    }
-    this.anims.create({key:"walking",frames:this.anims.generateFrameNumbers("chars",{frames:[0,1,2]}),frameRate:7,repeat:-1});
-    this.add.text(W/2,H-32,"W A S D  /  ↑ ↓ ← →  ·  EXPLORE",{fontSize:"11px",fontFamily:"monospace",color:"#927785"}).setOrigin(.5).setDepth(5);
-    this.input.keyboard?.on("keydown",(e:KeyboardEvent)=>{
-      if(e.repeat)return;
-      const tag=(document.activeElement as HTMLElement|null)?.tagName;
-      if(tag==="INPUT"||tag==="TEXTAREA")return;
-      const m:Record<string,[number,number,Direction]>={KeyW:[0,-1,"up"],ArrowUp:[0,-1,"up"],KeyS:[0,1,"down"],ArrowDown:[0,1,"down"],KeyA:[-1,0,"left"],ArrowLeft:[-1,0,"left"],KeyD:[1,0,"right"],ArrowRight:[1,0,"right"]};
-      const dir=m[e.code];if(dir){e.preventDefault();this.move(...dir);}
-    });
-    this.cameras.main.setBounds(0,0,W,H);
+  // The water network forms two winding streams; only bridges are walkable.
+  const water=this.add.graphics().setDepth(.5);
+  for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++)if(isWater(x,y)){
+   water.fillStyle(((x+y)%3===0)?0x699cf0:0x73a6f5);water.fillRect(x*TILE,y*TILE,TILE,TILE);
+   water.fillStyle(0xa3c8ff,.6);
+   if((x*5+y*3)%4===0)water.fillRect(x*TILE+9,y*TILE+15,16,2);
+   for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+    if(!isWater(x+dx,y+dy)){water.fillStyle(0x82b953);if(dx===1)water.fillRect(x*TILE+35,y*TILE,5,TILE);if(dx===-1)water.fillRect(x*TILE,y*TILE,5,TILE);if(dy===1)water.fillRect(x*TILE,y*TILE+35,TILE,5);if(dy===-1)water.fillRect(x*TILE,y*TILE,TILE,5);}
+   }
   }
-  private createPlayer(p:Player):Entry{
-    const group=this.add.container((p.x+.5)*TILE,(p.y+.5)*TILE).setDepth((p.y+1)*TILE+10);
-    const shadow=this.add.ellipse(0,13,24,6,0x2e263d,.24);
-    const sprite=this.add.sprite(0,-5,"chars",0).setScale(2.35).setTint(tint(p.color));
-    const label=this.add.text(0,-36,p.name,{fontSize:"11px",fontFamily:"monospace",fontStyle:"bold",color:"#433c56",backgroundColor:"#fff8ee",padding:{x:6,y:3}}).setOrigin(.5);
-    group.add([shadow,sprite,label]);
-    const player={sprite:group,x:p.x,y:p.y,color:p.color};
-    this.people.set(p.id,player);return player;
+  // Outdoors vegetation from the reusable Kenney CC0 RPG atlas.
+  const outdoor=(fx:number,fy:number,x:number,y:number,scale=2.5,depth?:number)=>{
+   return this.add.image(x*TILE,y*TILE,"outdoor",frame(fx,fy)).setOrigin(0).setScale(scale).setDepth(depth??y*TILE+26);
+  };
+  const indoor=(id:number,x:number,y:number,depth?:number)=>this.add.image(x*TILE,y*TILE,"indoor",id).setOrigin(0).setScale(2.5).setDepth(depth??y*TILE+30);
+  // Shoreline bridges, built of alternating hardwood planks.
+  for(const [sx,sy,w,h] of [[13,5,3,2],[6,10,2,2],[23,14,3,2]]) {
+   for(let x=0;x<w;x++)for(let y=0;y<h;y++){
+    indoor((x+y)%2===0?104:105,sx+x,sy+y,390);
+   }
+   const rail=this.add.graphics().setDepth(393);
+   rail.lineStyle(4,0x75472e,.95);
+   rail.strokeRect(sx*TILE+2,sy*TILE+2,w*TILE-4,h*TILE-4);
   }
-  private animate(p:Entry,x:number,y:number){
-    if(p.x===x&&p.y===y)return;
-    const sprite=p.sprite.list.find(c=>c instanceof Phaser.GameObjects.Sprite) as Phaser.GameObjects.Sprite|undefined;
-    this.tweens.killTweensOf(p.sprite);
-    sprite?.play("walking");
-    this.tweens.add({targets:p.sprite,x:(x+.5)*TILE,y:(y+.5)*TILE,duration:190,ease:"Sine.Out",
-      onUpdate:()=>p.sprite.setDepth(p.sprite.y+TILE/2+10),onComplete:()=>{sprite?.stop();sprite?.setFrame(0);}});
-    p.x=x;p.y=y;
+  // Trees, canopies, hedges and island vegetation.
+  for(const [x,y] of [[2,2],[10,2],[19,2],[26,2],[3,13],[19,16],[27,17],[10,17],[22,9]]){
+   outdoor(18,10,x,y,2.5,(y+2)*TILE+9);
+   outdoor(18,9,x,y-1,2.5,(y+2)*TILE+10);
   }
-  setSession(id:string){this.avatarId=id;}
-  sync(people:Player[]){
-    const active=new Set(people.map(x=>x.id));
-    for(const p of people){
-      const existing=this.people.get(p.id)??this.createPlayer(p);
-      this.animate(existing,p.x,p.y);
-    }
-    for(const [id,p] of this.people)if(!active.has(id)&&id!==this.avatarId){p.sprite.destroy();this.people.delete(id);}
+  for(const [x,y] of [[0,3],[1,17],[8,3],[17,4],[27,10],[11,18],[21,18],[25,8]]){
+   outdoor(21,10,x,y,2.5,y*TILE+40);
   }
-  local(id:string,name:string,color:string,x:number,y:number,direction:Direction){
-    this.avatarId=id;
-    if(!id){for(const p of this.people.values())p.sprite.destroy();this.people.clear();return;}
-    let p=this.people.get(id);
-    if(!p||p.color!==color){if(p)p.sprite.destroy();p=this.createPlayer({id,name,color,x,y,direction,lastSeen:Date.now()});}
-    this.animate(p,x,y);
+  // Gather-inspired social garden zones rendered with real furniture tiles.
+  for(const f of furniture){
+   const depth=(f.y+f.h)*TILE+12;
+   const stamp=(id:number,x:number,y:number)=>indoor(id,x,y,depth);
+   if(f.kind==="table"){
+    for(let x=0;x<f.w;x++)for(let y=0;y<f.h;y++)
+      stamp(y===0? (x===0?243:x===f.w-1?245:244):(x===0?270:x===f.w-1?272:271),f.x+x,f.y+y);
+    stamp(329,f.x+1,f.y+1);
+   } else if(f.kind==="desk"){
+    for(let x=0;x<f.w;x++)for(let y=0;y<f.h;y++)stamp(x===0?250:x===f.w-1?252:251,f.x+x,f.y+y);
+   } else if(f.kind==="sofa"){
+    for(let x=0;x<f.w;x++)for(let y=0;y<f.h;y++)stamp(x===0?313:x===f.w-1?315:314,f.x+x,f.y+y);
+   } else if(f.kind==="plant"){
+    outdoor(18,9,f.x,f.y,4,depth);
+   } else if(f.kind==="coffee"){
+    stamp(329,f.x,f.y);stamp(356,f.x+1,f.y+1);
+   } else if(f.kind==="shelf"){
+    for(let y=0;y<f.h;y++)for(let x=0;x<f.w;x++)stamp(478+x,f.x+x,f.y+y);
+   }
   }
-  move(dx:number,dy:number,d?:Direction){
-    if(!this.avatarId)return;
-    const p=this.people.get(this.avatarId);if(!p)return;
-    const x=p.x+dx,y=p.y+dy;if(!canMove(x,y))return;
-    const direction=d??(dx>0?"right":dx<0?"left":dy<0?"up":"down");
-    this.animate(p,x,y);
-    this.onWalk(x,y,direction);
+  // Decorations populate the space without adding artificial collision.
+  for(const [x,y] of [[4,16],[12,4],[18,11],[28,6],[2,5],[13,17],[25,3]])outdoor(25,9,x,y,1.8,y*TILE+12);
+  for(const [x,y] of [[9,8],[17,15],[24,18],[3,4],[20,8],[28,12]])outdoor(2,6,x,y,2.2,y*TILE+7);
+  const label=(x:number,y:number,value:string)=>{
+   this.add.text(x*TILE,y*TILE,value,{fontFamily:"monospace",fontSize:"13px",fontStyle:"bold",color:"#fff7d8",backgroundColor:"#365f338c",padding:{left:7,right:7,top:4,bottom:4}}).setDepth(9000);
+  };
+  label(2,6,"PICNIC & FOCUS");
+  label(13,10,"CAMPFIRE HUB");
+  label(23,10,"WORK DECK");
+  this.anims.create({key:"walking",frames:this.anims.generateFrameNumbers("chars",{frames:[0,1,2]}),frameRate:8,repeat:-1});
+  this.input.keyboard?.on("keydown",(e:KeyboardEvent)=>{
+   if(e.repeat)return;
+   const tag=(document.activeElement as HTMLElement|null)?.tagName;
+   if(tag==="INPUT"||tag==="TEXTAREA")return;
+   const map:Record<string,[number,number,Direction]>={KeyW:[0,-1,"up"],ArrowUp:[0,-1,"up"],KeyS:[0,1,"down"],ArrowDown:[0,1,"down"],KeyA:[-1,0,"left"],ArrowLeft:[-1,0,"left"],KeyD:[1,0,"right"],ArrowRight:[1,0,"right"]};
+   const direction=map[e.code];if(direction){e.preventDefault();this.move(...direction);}
+  });
+  this.cameras.main.setBounds(0,0,W,H);
+ }
+ private createPlayer(p:Player):Entry{
+  const group=this.add.container((p.x+.5)*TILE,(p.y+.5)*TILE).setDepth((p.y+1)*TILE+20);
+  const shadow=this.add.ellipse(0,13,24,6,0x293c26,.35);
+  const character=this.add.sprite(0,-5,"chars",0).setScale(2.3).setTint(tint(p.color));
+  const label=this.add.text(0,-36,p.name,{fontFamily:"monospace",fontSize:"11px",fontStyle:"bold",color:"#3f3551",backgroundColor:"#fff8eb",padding:{left:6,right:6,top:3,bottom:3}}).setOrigin(.5);
+  group.add([shadow,character,label]);
+  const entry={sprite:group,x:p.x,y:p.y,color:p.color,direction:p.direction};
+  this.people.set(p.id,entry);return entry;
+ }
+ private animate(player:Entry,x:number,y:number,direction:Direction){
+  if(player.x===x&&player.y===y){player.direction=direction;return;}
+  const sprite=player.sprite.list.find(c=>c instanceof Phaser.GameObjects.Sprite) as Phaser.GameObjects.Sprite|undefined;
+  this.tweens.killTweensOf(player.sprite);
+  sprite?.play("walking");
+  if(sprite)sprite.setFlipX(direction==="left");
+  this.tweens.add({targets:player.sprite,x:(x+.5)*TILE,y:(y+.5)*TILE,duration:180,ease:"Sine.Out",
+   onUpdate:()=>player.sprite.setDepth(player.sprite.y+TILE/2+20),onComplete:()=>{sprite?.stop();sprite?.setFrame(0);}});
+  player.x=x;player.y=y;player.direction=direction;
+ }
+ setSession(id:string){this.avatarId=id;}
+ sync(players:Player[]){
+  const active=new Set(players.map(p=>p.id));
+  for(const p of players){
+   let current=this.people.get(p.id);
+   if(!current)current=this.createPlayer(p);
+   this.animate(current,p.x,p.y,p.direction);
   }
+  for(const [id,p] of this.people)if(!active.has(id)&&id!==this.avatarId){p.sprite.destroy();this.people.delete(id);}
+ }
+ local(id:string,name:string,color:string,x:number,y:number,direction:Direction){
+  this.avatarId=id;
+  if(!id){for(const p of this.people.values())p.sprite.destroy();this.people.clear();return;}
+  let current=this.people.get(id);
+  if(!current||current.color!==color){if(current)current.sprite.destroy();current=this.createPlayer({id,name,color,x,y,direction,lastSeen:Date.now()});}
+  this.animate(current,x,y,direction);
+ }
+ move(dx:number,dy:number,d?:Direction){
+  if(!this.avatarId)return;
+  const current=this.people.get(this.avatarId);if(!current)return;
+  const x=current.x+dx,y=current.y+dy;
+  if(!canMove(x,y))return;
+  const direction=d??(dx>0?"right":dx<0?"left":dy<0?"up":"down");
+  this.animate(current,x,y,direction);this.onWalk(x,y,direction);
+ }
 }
 export function mountOffice(element:HTMLElement,onMove:(x:number,y:number,d:Direction)=>void){
-  const scene=new OfficeScene(onMove);
-  const game=new Phaser.Game({type:Phaser.AUTO,parent:element,width:COLS*TILE,height:ROWS*TILE,pixelArt:true,
-    scale:{mode:Phaser.Scale.FIT,autoCenter:Phaser.Scale.CENTER_BOTH},scene:[scene],render:{antialias:false}});
-  return {game,scene};
+ const scene=new OfficeScene(onMove);
+ const game=new Phaser.Game({type:Phaser.AUTO,parent:element,width:COLS*TILE,height:ROWS*TILE,pixelArt:true,
+ scale:{mode:Phaser.Scale.FIT,autoCenter:Phaser.Scale.CENTER_BOTH},scene:[scene],render:{antialias:false}});
+ return {game,scene};
 }
