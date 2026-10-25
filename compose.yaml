@@ -1,0 +1,37 @@
+name: kuvoro-core-web
+services:
+  web:
+    container_name: kuvoro-core-web
+    image: kuvoro-core-web:${KUVORO_IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        KUVORO_REVISION: ${KUVORO_REVISION:-unknown}
+    environment:
+      KUVORO_REVISION: ${KUVORO_REVISION:-unknown}
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+    ports:
+      - "${KUVORO_BIND_ADDRESS:-0.0.0.0}:${KUVORO_PORT:-3187}:3000"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=32m
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 768m
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    labels:
+      org.opencontainers.image.title: Kuvoro Core Web
+      org.opencontainers.image.revision: ${KUVORO_REVISION:-unknown}
