@@ -16,3 +16,7 @@ Guest room, avatar selection, keyboard/touch movement, other guests via 1.5-seco
 ## Virtual world
 
 Phaser 4 renders a 24x16 pixel-art office, with directional character movement, furniture collision, and the existing multi-user presence. The office graphics are original procedural pixel art. Kenney Roguelike Indoor assets have a CC0 license; see `public/assets/KENNEY-LICENSE.txt`.
+
+## Pixel-art asset upgrade
+
+The office now renders tile and furniture frames from Kenney Roguelike Indoors and animated avatars from Kenney Roguelike Characters, both CC0 licensed. Prepared sprite atlases are bundled under `public/assets/` for Phaser. This task stops at a Docker image build; deploy the tested image separately only after browser visual QA.
