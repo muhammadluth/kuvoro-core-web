@@ -9,6 +9,8 @@ const frame=(x:number,y:number)=>y*INDEX_COLS+x;
 export class OfficeScene extends Phaser.Scene{
  private people=new Map<string,Entry>();
  private avatarId="";
+ private held=new Set<string>();
+ private nextStep=0;
  private onWalk:(x:number,y:number,d:Direction)=>void;
  constructor(onWalk:(x:number,y:number,d:Direction)=>void){super("office");this.onWalk=onWalk;}
  preload(){
@@ -20,11 +22,13 @@ export class OfficeScene extends Phaser.Scene{
   const W=COLS*TILE,H=ROWS*TILE;
   this.cameras.main.setBackgroundColor("#588e3d");
   const ground=this.add.graphics().setDepth(0);
-  const grass=[0x5a913c,0x609741,0x59913d,0x568b39,0x60913d];
+  ground.fillStyle(0x568c3f);
+  ground.fillRect(0,0,W,H);
+  // Irregular terrain patches instead of a repetitive checkerboard.
   for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++){
-   ground.fillStyle(grass[(x*7+y*3)%grass.length]);
-   ground.fillRect(x*TILE,y*TILE,TILE,TILE);
-   if((x*13+y*17)%9===0){ground.fillStyle(0x477b35,.8);ground.fillRect(x*TILE+8,y*TILE+29,5,2);ground.fillRect(x*TILE+12,y*TILE+26,2,3);}
+   const hash=(x*73856093 ^ y*19349663)>>>0;
+   if(hash%7===0){ground.fillStyle(hash%3===0?0x609647:0x50883a,.65);ground.fillRoundedRect(x*TILE+6,y*TILE+9,34,24,13);}
+   if(hash%5===0){ground.fillStyle(0x366e30,.42);ground.fillRect(x*TILE+11,y*TILE+31,3,5);ground.fillRect(x*TILE+16,y*TILE+28,3,6);}
   }
   // The water network forms two winding streams; only bridges are walkable.
   const water=this.add.graphics().setDepth(.5);
@@ -88,14 +92,27 @@ export class OfficeScene extends Phaser.Scene{
   label(13,10,"CAMPFIRE HUB");
   label(23,10,"WORK DECK");
   this.anims.create({key:"walking",frames:this.anims.generateFrameNumbers("chars",{frames:[0,1,2]}),frameRate:8,repeat:-1});
+  const inputKeys=["KeyW","KeyA","KeyS","KeyD","ArrowUp","ArrowLeft","ArrowDown","ArrowRight"];
   this.input.keyboard?.on("keydown",(e:KeyboardEvent)=>{
-   if(e.repeat)return;
    const tag=(document.activeElement as HTMLElement|null)?.tagName;
    if(tag==="INPUT"||tag==="TEXTAREA")return;
-   const map:Record<string,[number,number,Direction]>={KeyW:[0,-1,"up"],ArrowUp:[0,-1,"up"],KeyS:[0,1,"down"],ArrowDown:[0,1,"down"],KeyA:[-1,0,"left"],ArrowLeft:[-1,0,"left"],KeyD:[1,0,"right"],ArrowRight:[1,0,"right"]};
-   const direction=map[e.code];if(direction){e.preventDefault();this.move(...direction);}
+   if(inputKeys.includes(e.code)){e.preventDefault();this.held.add(e.code);}
   });
+  this.input.keyboard?.on("keyup",(e:KeyboardEvent)=>this.held.delete(e.code));
+  this.game.events.on(Phaser.Core.Events.BLUR,()=>this.held.clear());
   this.cameras.main.setBounds(0,0,W,H);
+  this.cameras.main.setZoom(1.3);
+  this.cameras.main.setRoundPixels(false);
+ }
+ update(time:number){
+  if(!this.avatarId || time<this.nextStep)return;
+  const pressed=(...codes:string[])=>codes.some(c=>this.held.has(c));
+  const dx=Number(pressed("KeyD","ArrowRight"))-Number(pressed("KeyA","ArrowLeft"));
+  const dy=Number(pressed("KeyS","ArrowDown"))-Number(pressed("KeyW","ArrowUp"));
+  if(dx!==0||dy!==0){
+   this.move(dx!==0?dx:0,dx!==0?0:dy);
+   this.nextStep=time+140;
+  }
  }
  private createPlayer(p:Player):Entry{
   const group=this.add.container((p.x+.5)*TILE,(p.y+.5)*TILE).setDepth((p.y+1)*TILE+20);
@@ -103,6 +120,7 @@ export class OfficeScene extends Phaser.Scene{
   const character=this.add.sprite(0,-5,"chars",0).setScale(2.3).setTint(tint(p.color));
   const label=this.add.text(0,-36,p.name,{fontFamily:"monospace",fontSize:"11px",fontStyle:"bold",color:"#3f3551",backgroundColor:"#fff8eb",padding:{left:6,right:6,top:3,bottom:3}}).setOrigin(.5);
   group.add([shadow,character,label]);
+  if(p.id===this.avatarId)this.cameras.main.startFollow(group,true,.08,.08);
   const entry={sprite:group,x:p.x,y:p.y,color:p.color,direction:p.direction};
   this.people.set(p.id,entry);return entry;
  }
@@ -112,7 +130,7 @@ export class OfficeScene extends Phaser.Scene{
   this.tweens.killTweensOf(player.sprite);
   sprite?.play("walking");
   if(sprite)sprite.setFlipX(direction==="left");
-  this.tweens.add({targets:player.sprite,x:(x+.5)*TILE,y:(y+.5)*TILE,duration:180,ease:"Sine.Out",
+  this.tweens.add({targets:player.sprite,x:(x+.5)*TILE,y:(y+.5)*TILE,duration:140,ease:"Sine.InOut",
    onUpdate:()=>player.sprite.setDepth(player.sprite.y+TILE/2+20),onComplete:()=>{sprite?.stop();sprite?.setFrame(0);}});
   player.x=x;player.y=y;player.direction=direction;
  }
@@ -132,6 +150,7 @@ export class OfficeScene extends Phaser.Scene{
   let current=this.people.get(id);
   if(!current||current.color!==color){if(current)current.sprite.destroy();current=this.createPlayer({id,name,color,x,y,direction,lastSeen:Date.now()});}
   this.animate(current,x,y,direction);
+  this.cameras.main.startFollow(current.sprite,true,.08,.08);
  }
  move(dx:number,dy:number,d?:Direction){
   if(!this.avatarId)return;
